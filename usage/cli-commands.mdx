@@ -1,0 +1,213 @@
+---
+title: CLI Commands
+description: Complete reference for all Marlin CLI commands
+---
+
+Marlin uses a command-line interface similar to UCI (Universal Chess Interface) protocol. The engine reads commands from stdin and responds to stdout.
+
+## Command Reference
+
+| Command            | Description                      | Example         |
+| ------------------ | -------------------------------- | --------------- |
+| `position [moves]` | Set up position by playing moves | `position 4433` |
+| `display`          | Show the board                   | `display`       |
+| `go`               | Find the best move               | `go`            |
+| `help`             | Show commands                    | `help`          |
+| `quit`             | Exit                             | `quit`          |
+
+## position
+
+Sets up a board position by playing a sequence of moves from an empty board.
+
+**Syntax:**
+```bash
+position [moves]
+```
+
+**Parameters:**
+- `moves` (optional): A string of digits 1-7 representing column numbers. If omitted, resets to an empty board.
+
+**Examples:**
+
+<CodeGroup>
+```bash Empty board
+> position
+Position reset to empty board
+```
+
+```bash With moves
+> position 4433
+Played 4 moves
+```
+
+```bash Invalid move
+> position 44448
+Error: Invalid character '8' in move string
+```
+
+```bash Full column
+> position 1111111
+Error: Column 1 is full
+```
+</CodeGroup>
+
+**How it works** (source/src/main.cpp:71-84):
+1. Resets the board to empty
+2. Parses each character as a column number (1-7)
+3. Validates the move is legal
+4. Applies moves sequentially, alternating players
+
+## display
+
+Shows the current board state with pieces and column numbers.
+
+**Syntax:**
+```bash
+display
+```
+
+**Alias:** `d`
+
+**Example output:**
+
+```bash
+> position 4433
+Played 4 moves
+
+> display
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . O O . . . |
+| . . X X . . . |
++---------------+
+  1 2 3 4 5 6 7
+```
+
+**Legend:**
+- `X` = Current player's pieces
+- `O` = Opponent's pieces
+- `.` = Empty cell
+- Numbers at bottom = Column numbers (1-7)
+
+## go
+
+Analyzes the current position and finds the best move using the Negamax solver with alpha-beta pruning.
+
+**Syntax:**
+```bash
+go
+```
+
+**Example output:**
+
+```bash
+> position 4433
+Played 4 moves
+
+> go
+Analyzing...
+  Column 1: score -18
+  Column 2: score 16
+  Column 3: score 18
+  Column 4: score -20
+  Column 5: score 16
+  Column 6: score -18
+  Column 7: score -18
+bestmove 3 score 18 (WIN)
+Nodes analyzed: 12847
+```
+
+**Output format:**
+- **Analysis lines**: Shows the score for each legal move
+- **bestmove**: The recommended column to play (1-7)
+- **score**: The game-theoretic value (see [Understanding Scores](/usage/understanding-scores))
+- **result**: `WIN`, `LOSE`, or `DRAW`
+- **Nodes analyzed**: Number of positions evaluated
+
+**Special cases:**
+
+<CodeGroup>
+```bash Immediate win
+> go
+bestmove 4 score WIN (immediate)
+```
+
+```bash Game over
+> go
+Game is a draw - no moves available
+```
+</CodeGroup>
+
+<Note>
+The solver checks for immediate winning moves first (source/src/main.cpp:93-98), providing instant results without deep analysis.
+</Note>
+
+## help
+
+Displays a summary of available commands.
+
+**Syntax:**
+```bash
+help
+```
+
+**Output:**
+```bash
+> help
+Commands:
+  position [moves]  - Set position (e.g., 'position 4433')
+  display           - Show the board
+  go                - Find best move
+  quit              - Exit
+```
+
+## quit
+
+Exits the Marlin engine.
+
+**Syntax:**
+```bash
+quit
+```
+
+**Alias:** `exit`
+
+**Example:**
+```bash
+> quit
+Goodbye!
+```
+
+## Error Handling
+
+Marlin provides clear error messages for invalid input:
+
+<CodeGroup>
+```bash Unknown command
+> analyze
+Unknown command: analyze (type 'help' for commands)
+```
+
+```bash Invalid character
+> position 123x456
+Error: Invalid character 'x' in move string
+```
+
+```bash Full column
+> position 1111111
+Error: Column 1 is full
+```
+</CodeGroup>
+
+## Implementation Details
+
+The command loop is implemented in source/src/main.cpp:145-199:
+
+1. Reads lines from stdin
+2. Parses command and arguments
+3. Dispatches to handler functions
+4. Continues until `quit` or EOF
+
+Empty lines are ignored (source/src/main.cpp:190-192).

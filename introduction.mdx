@@ -1,0 +1,107 @@
+---
+title: Introduction
+description: A high-performance Connect 4 solver using C++ bitboards and negamax algorithm with alpha-beta pruning
+---
+
+## What is Marlin?
+
+Marlin is a game-theoretic Connect 4 solver that finds **optimal moves** using advanced computer science techniques. Built with C++ and inspired by Stockfish's architecture, Marlin can analyze any Connect 4 position and determine the perfect move with mathematical certainty.
+
+Unlike typical game-playing AI that uses heuristics or machine learning, Marlin uses **exact search algorithms** to exhaustively explore the game tree and prove whether a position is winning, losing, or drawn.
+
+## Key Features
+
+<CardGroup cols={2}>
+  <Card title="Bitboard Representation" icon="grid">
+    Stores the entire 6x7 board as a 64-bit integer, enabling blazing fast bitwise operations instead of array lookups
+  </Card>
+  
+  <Card title="Negamax Algorithm" icon="arrow-down-arrow-up">
+    Recursive game tree search using the "my opponent's loss = my gain" principle to simplify minimax logic
+  </Card>
+  
+  <Card title="Alpha-Beta Pruning" icon="scissors">
+    Skips billions of unnecessary calculations by eliminating branches that cannot affect the final result
+  </Card>
+  
+  <Card title="Transposition Tables" icon="table">
+    Caches evaluated positions (8M entries, ~64MB) to avoid redundant computation when the same position is reached via different move sequences
+  </Card>
+  
+  <Card title="Move Ordering" icon="arrows-up-down">
+    Tries center columns first (4, 3, 5, 2, 6, 1, 7) for better pruning efficiency, as center positions offer more winning opportunities
+  </Card>
+  
+  <Card title="CLI Interface" icon="terminal">
+    Simple command-line interface for setting positions, displaying boards, and finding optimal moves
+  </Card>
+</CardGroup>
+
+## How It Works
+
+### Bitboards
+
+Instead of using a 2D array like `board[6][7]`, Marlin represents the entire game state using just two 64-bit integers:
+
+- **`mask`** - Marks all occupied cells (by either player)
+- **`position`** - Marks only the current player's pieces
+
+Each column uses 7 bits (6 playable rows + 1 buffer bit), allowing win detection via bitwise operations:
+
+```cpp
+// Horizontal win detection (4 in a row)
+uint64_t m = pos & (pos >> 7);   // Find adjacent pairs
+if (m & (m >> 14)) {              // Check if pairs are adjacent
+    // Four in a row detected!
+}
+```
+
+This approach is **~100x faster** than traditional array-based representations.
+
+### Negamax with Alpha-Beta Pruning
+
+Marlin searches the game tree recursively, exploring all possible move sequences. The **alpha-beta pruning** optimization eliminates branches that cannot improve the outcome:
+
+- **Alpha**: Best score the current player is guaranteed (lower bound)
+- **Beta**: Worst score the opponent will allow (upper bound)
+- When `alpha >= beta`, the remaining moves in that branch can be safely skipped
+
+Combined with **move ordering** (trying center columns first), this reduces the search space dramatically.
+
+### Transposition Tables
+
+The same board position can be reached through different move sequences. For example:
+- Sequence A: `1, 2, 3` → [same board] ← Sequence B: `3, 2, 1`
+
+Marlin's transposition table caches position evaluations, so each unique board state is only analyzed once, regardless of how many different move orders lead to it.
+
+## Understanding Scores
+
+When Marlin analyzes a position, it returns a score from the current player's perspective:
+
+- **Positive score** → Current player can force a win
+- **Zero** → Draw with perfect play from both sides
+- **Negative score** → Opponent can force a win
+- **Higher magnitude** → Faster win/loss
+
+For example, a score of `+18` means the current player can force a win in 18 moves.
+
+## Get Started
+
+<CardGroup cols={3}>
+  <Card title="Installation" icon="download" href="/installation">
+    Build Marlin from source using CMake
+  </Card>
+  
+  <Card title="Quick Start" icon="rocket" href="/quickstart">
+    Run your first analysis in 2 minutes
+  </Card>
+  
+  <Card title="Core Concepts" icon="book" href="/concepts/bitboards">
+    Deep dive into bitboards, negamax, and alpha-beta pruning
+  </Card>
+</CardGroup>
+
+<Note>
+Marlin is an educational project that demonstrates how classic game-playing algorithms work in practice. It's perfect for learning about bitboards, alpha-beta pruning, and transposition tables.
+</Note>

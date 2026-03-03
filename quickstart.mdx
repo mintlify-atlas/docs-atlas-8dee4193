@@ -1,80 +1,225 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quick Start
+description: Run your first Connect 4 analysis with Marlin
 ---
 
-## Get started in three steps
+## Running Marlin
 
-Get your documentation site running locally and make your first customization.
+After building Marlin, launch the interactive CLI:
 
-### Step 1: Set up your local environment
+```bash
+./build/marlin
+```
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
+You'll see the welcome prompt:
+
+```
+Marlin Connect 4 Engine v0.1
+Type 'help' for available commands.
+
+>
+```
+
+## Available Commands
+
+Marlin supports the following commands:
+
+| Command | Description | Example |
+|---------|-------------|----------|
+| `position [moves]` | Set up a position by playing moves | `position 4433` |
+| `display` | Show the current board state | `display` |
+| `go` | Find the best move using the solver | `go` |
+| `help` | Show available commands | `help` |
+| `quit` | Exit the program | `quit` |
+
+## Move Format
+
+Moves are represented as **digits 1-7**, where each digit corresponds to a column:
+
+- `4` → Drop a piece in column 4 (the center column)
+- `4433` → Play four moves:
+  1. Player 1 drops in column 4
+  2. Player 2 drops in column 4
+  3. Player 1 drops in column 3
+  4. Player 2 drops in column 3
+
+The board uses 1-based indexing for user input (columns 1-7 from left to right).
+
+## Example Session
+
+Here's a complete example showing how to analyze a position:
+
+<Steps>
+  <Step title="Set up a position">
+    Let's create a position where both players have played in the center columns:
     
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
+    ```bash
+    > position 4433
+    Played 4 moves
+    ```
     
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
-
-### Step 2: Deploy your changes
-
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
+    This plays:
+    - Move 1: Player 1 (X) → column 4
+    - Move 2: Player 2 (O) → column 4  
+    - Move 3: Player 1 (X) → column 3
+    - Move 4: Player 2 (O) → column 3
+  </Step>
+  
+  <Step title="Display the board">
+    View the current position:
     
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    ```bash
+    > display
+    | . . . . . . . |
+    | . . . . . . . |
+    | . . . . . . . |
+    | . . . . . . . |
+    | . . O O . . . |
+    | . . X X . . . |
+    +---------------+
+      1 2 3 4 5 6 7
+    ```
+    
+    **Legend**:
+    - `X` = Current player's pieces (Player 1)
+    - `O` = Opponent's pieces (Player 2)
+    - `.` = Empty cells
+  </Step>
+  
+  <Step title="Find the best move">
+    Ask Marlin to analyze the position and find the optimal move:
+    
+    ```bash
+    > go
+    Analyzing...
+      Column 3: score 18
+    bestmove 3 score 18 (WIN)
+    Nodes analyzed: 12847
+    ```
+    
+    **Output explanation**:
+    - **bestmove 3** → Column 3 is the optimal move
+    - **score 18** → Current player can force a win in 18 moves
+    - **Nodes analyzed: 12847** → The solver explored 12,847 positions to find this result
+  </Step>
+</Steps>
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+## Understanding the Analysis
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+### Score Interpretation
 
-### Step 3: Go live
+Marlin's scores are always from the **current player's perspective**:
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
-
-## Next steps
-
-Now that you have your docs running, explore these key features:
-
-<CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+<CardGroup cols={3}>
+  <Card title="Positive Score" icon="arrow-up" color="#22c55e">
+    Current player can force a win
+    
+    Example: `+18` = Win in 18 moves
+  </Card>
+  
+  <Card title="Zero Score" icon="minus" color="#6b7280">
+    Perfect play leads to a draw
+    
+    Neither player can force a win
+  </Card>
+  
+  <Card title="Negative Score" icon="arrow-down" color="#ef4444">
+    Opponent can force a win
+    
+    Example: `-12` = Lose in 12 moves
+  </Card>
 </CardGroup>
 
+**Score magnitude** indicates how quickly the game will end:
+- Higher positive → Faster win for current player
+- Lower negative → Faster win for opponent
+
+### Move Analysis Output
+
+When you run `go`, Marlin shows the evaluation for each legal move:
+
+```bash
+Analyzing...
+  Column 1: score -8
+  Column 2: score 12
+  Column 3: score 18    ← Best move
+  Column 4: score 14
+  Column 5: score 10
+  Column 6: score -2
+  Column 7: score -6
+bestmove 3 score 18 (WIN)
+Nodes analyzed: 45231
+```
+
+This tells you:
+- Each column's game-theoretic value
+- Which move is optimal (column 3 with score +18)
+- How many positions were searched
+
+## Common Workflows
+
+### Analyze an Opening
+
+```bash
+> position 4        # Player 1 plays center
+Played 1 moves
+> go
+Analyzing...
+bestmove 4 score 0 (DRAW)
+Nodes analyzed: 2847
+```
+
+The center opening leads to a draw with perfect play.
+
+### Reset to Empty Board
+
+```bash
+> position
+Position reset to empty board
+> display
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
++---------------+
+  1 2 3 4 5 6 7
+```
+
+### Detect Immediate Wins
+
+Marlin quickly detects winning moves without deep search:
+
+```bash
+> position 444555666    # Set up a position
+> go
+bestmove 7 score WIN (immediate)
+```
+
+The solver recognizes that column 7 wins instantly.
+
+## Performance Notes
+
 <Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
+Marlin uses **transposition tables** to cache positions. The first analysis of a position tree may take longer, but subsequent analyses (even from different move orders) will be much faster.
 </Note>
+
+The **node count** shows how many positions were examined:
+- Small numbers (< 1,000) → Shallow search or heavily pruned
+- Large numbers (> 100,000) → Deep search in complex positions
+- The transposition table and alpha-beta pruning work together to minimize this count
+
+## Next Steps
+
+Now that you can run basic analyses, learn how Marlin works under the hood:
+
+<CardGroup cols={2}>
+  <Card title="Core Concepts" icon="book" href="/concepts/bitboards">
+    Understand bitboards, negamax, and alpha-beta pruning
+  </Card>
+  
+  <Card title="API Reference" icon="code" href="/api/position">
+    Explore Marlin's classes and methods
+  </Card>
+</CardGroup>

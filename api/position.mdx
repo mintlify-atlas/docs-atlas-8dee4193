@@ -1,0 +1,354 @@
+---
+title: 'Position Class'
+description: 'Bitboard representation of a Connect 4 game position'
+---
+
+The `Position` class uses bitboard representation to efficiently store and manipulate Connect 4 game states. Instead of using a 2D array, the board is represented using 64-bit integers where each bit corresponds to a cell on the board.
+
+## Bitboard Layout
+
+The 6x7 board is mapped to bits 0-48 of a 64-bit integer:
+
+```
+  Col 0    Col 1    Col 2    Col 3    Col 4    Col 5    Col 6
++--------+--------+--------+--------+--------+--------+--------+
+|  (6)   |  (13)  |  (20)  |  (27)  |  (34)  |  (41)  |  (48)  | <- Buffer row
++--------+--------+--------+--------+--------+--------+--------+
+|   5    |   12   |   19   |   26   |   33   |   40   |   47   | <- Row 5 (top)
+|   4    |   11   |   18   |   25   |   32   |   39   |   46   |
+|   3    |   10   |   17   |   24   |   31   |   38   |   45   |
+|   2    |    9   |   16   |   23   |   30   |   37   |   44   |
+|   1    |    8   |   15   |   22   |   29   |   36   |   43   |
+|   0    |    7   |   14   |   21   |   28   |   35   |   42   | <- Row 0 (bottom)
++--------+--------+--------+--------+--------+--------+--------+
+```
+
+Formula: `bit_index = col * 7 + row`
+
+Each column uses 7 bits: 6 for playable rows plus 1 buffer bit at the top to prevent false diagonal wins from wrapping around.
+
+## Constants
+
+### WIDTH
+```cpp
+static constexpr int WIDTH = 7;
+```
+Number of columns on the board.
+
+### HEIGHT
+```cpp
+static constexpr int HEIGHT = 6;
+```
+Number of playable rows on the board.
+
+### BOTTOM_MASK
+```cpp
+static constexpr uint64_t BOTTOM_MASK = 
+    (1ULL << 0) | (1ULL << 7) | (1ULL << 14) | (1ULL << 21) | 
+    (1ULL << 28) | (1ULL << 35) | (1ULL << 42);
+```
+Pre-computed bitboard with 1s at the bottom of every column. Used for the "gravity trick" when making moves.
+
+### BOARD_MASK
+```cpp
+static constexpr uint64_t BOARD_MASK = BOTTOM_MASK * ((1ULL << HEIGHT) - 1);
+```
+Bitboard with 1s in all playable cells (excludes buffer bits).
+
+## Static Methods
+
+### bottom_mask()
+```cpp
+static constexpr uint64_t bottom_mask(int col);
+```
+Returns a bitboard with a single 1 at the bottom of the given column.
+
+<ParamField path="col" type="int">
+  Column index (0-6)
+</ParamField>
+
+**Returns:** `uint64_t` - Bitboard with only the bottom cell of the column set
+
+**Example:**
+```cpp
+// Bottom of column 0 (bit 0)
+auto mask = Position::bottom_mask(0);  // Returns 0x1
+
+// Bottom of column 3 (bit 21)
+auto mask = Position::bottom_mask(3);  // Returns 0x200000
+```
+
+### column_mask()
+```cpp
+static constexpr uint64_t column_mask(int col);
+```
+Returns a bitboard with 1s in all playable cells of the given column (6 bits, excluding the buffer bit).
+
+<ParamField path="col" type="int">
+  Column index (0-6)
+</ParamField>
+
+**Returns:** `uint64_t` - Bitboard with all playable cells in the column set
+
+**Example:**
+```cpp
+// All playable cells in column 0 (bits 0-5)
+auto mask = Position::column_mask(0);
+
+// All playable cells in column 1 (bits 7-12)
+auto mask = Position::column_mask(1);
+```
+
+### top_mask()
+```cpp
+static constexpr uint64_t top_mask(int col);
+```
+Returns a bitboard with a single 1 at the top playable cell of the given column (row 5, not the buffer bit). Useful for checking if a column is full.
+
+<ParamField path="col" type="int">
+  Column index (0-6)
+</ParamField>
+
+**Returns:** `uint64_t` - Bitboard with only the top playable cell of the column set
+
+### bottom()
+```cpp
+static constexpr uint64_t bottom();
+```
+Returns a bitboard with 1s at the bottom of every column. Equivalent to `BOTTOM_MASK`.
+
+**Returns:** `uint64_t` - Bitboard with bottom cells of all columns set
+
+## Public Methods
+
+### Constructor
+```cpp
+Position();
+```
+Creates an empty board with no pieces played.
+
+**Example:**
+```cpp
+Position pos;  // Creates empty board
+```
+
+### can_play()
+```cpp
+bool can_play(int col) const;
+```
+Checks if a column has room for another piece. A column is full when the top playable cell (row 5) is occupied.
+
+<ParamField path="col" type="int">
+  Column index (0-6) to check
+</ParamField>
+
+**Returns:** `bool` - `true` if the column has space, `false` if full
+
+**Example:**
+```cpp
+Position pos;
+if (pos.can_play(3)) {
+    pos.make_move(3);
+}
+```
+
+From `main.cpp:52-56`:
+```cpp
+// Check if column is playable
+if (!pos.can_play(col)) {
+    std::cerr << "Error: Column " << (col + 1) << " is full\n";
+    return -1;
+}
+```
+
+### make_move()
+```cpp
+void make_move(int col);
+```
+Drops a piece into the given column using the "gravity trick" - binary addition to find the lowest empty row without looping.
+
+<ParamField path="col" type="int">
+  Column index (0-6) to play in
+</ParamField>
+
+**Precondition:** `can_play(col)` must be true
+
+**The Gravity Trick:**
+Instead of looping to find the first empty row, this method uses binary addition:
+1. Get the column's bits from the mask: `col_bits = mask & column_mask(col)`
+2. Add the bottom bit: `col_bits + bottom_mask(col)`
+3. The carry propagates up to the first empty cell!
+
+**Example:**
+```cpp
+Position pos;
+pos.make_move(3);  // Drop piece in column 3
+pos.make_move(3);  // Drop another piece in column 3
+```
+
+From `main.cpp:58-60`:
+```cpp
+// Make the move
+pos.make_move(col);
+count++;
+```
+
+### nb_moves()
+```cpp
+int nb_moves() const;
+```
+Returns the number of moves played so far.
+
+**Returns:** `int` - Move count (0 to 42)
+
+**Example:**
+```cpp
+Position pos;
+pos.make_move(3);
+pos.make_move(4);
+std::cout << pos.nb_moves();  // Outputs: 2
+```
+
+From `main.cpp:101-103`:
+```cpp
+// Check if game is already over
+if (pos.nb_moves() == Position::WIDTH * Position::HEIGHT) {
+    std::cout << "Game is a draw - no moves available\n";
+```
+
+### get_mask()
+```cpp
+uint64_t get_mask() const;
+```
+Returns the mask bitboard showing all occupied cells (by either player).
+
+**Returns:** `uint64_t` - Bitboard where each occupied cell has a 1
+
+### get_position()
+```cpp
+uint64_t get_position() const;
+```
+Returns the current player's position bitboard.
+
+**Returns:** `uint64_t` - Bitboard showing only the current player's pieces
+
+**Note:** The opponent's pieces can be computed as `mask ^ position`.
+
+### key()
+```cpp
+uint64_t key() const;
+```
+Generates a unique key for this position used for the transposition table. Two identical board positions (same pieces, same player's turn) will have the same key.
+
+**Returns:** `uint64_t` - Unique position identifier
+
+**Formula:** `position + mask + BOTTOM_MASK`
+
+This cleverly encodes both the stone positions and whose turn it is.
+
+### is_winning_move()
+```cpp
+bool is_winning_move(int col) const;
+```
+Checks if playing in the given column would result in a win for the current player.
+
+<ParamField path="col" type="int">
+  Column index (0-6) to check
+</ParamField>
+
+**Returns:** `bool` - `true` if the move wins the game, `false` otherwise
+
+**Win Detection:**
+Uses bitshifts to check for 4-in-a-row:
+- Horizontal: shift by 7 (one column)
+- Vertical: shift by 1 (one row)
+- Diagonal /: shift by 8 (one row + one column)
+- Diagonal \\: shift by 6 (one row - one column)
+
+**Example:**
+```cpp
+for (int col = 0; col < Position::WIDTH; col++) {
+    if (pos.can_play(col) && pos.is_winning_move(col)) {
+        std::cout << "Winning move found in column " << col << std::endl;
+    }
+}
+```
+
+From `main.cpp:93-97`:
+```cpp
+// Check for immediate wins first (fast path)
+for (int col = 0; col < Position::WIDTH; col++) {
+    if (pos.can_play(col) && pos.is_winning_move(col)) {
+        std::cout << "bestmove " << (col + 1) << " score WIN (immediate)\n";
+        return;
+    }
+}
+```
+
+### display()
+```cpp
+void display() const;
+```
+Prints the board to stdout for debugging and visualization.
+
+**Output format:**
+- `'X'` for current player's pieces
+- `'O'` for opponent's pieces  
+- `'.'` for empty cells
+- Column numbers (1-7) printed at the bottom
+
+**Example:**
+```cpp
+Position pos;
+pos.make_move(3);
+pos.make_move(3);
+pos.display();
+// Output:
+// . . . . . . .
+// . . . . . . .
+// . . . . . . .
+// . . . . . . .
+// . . . O . . .
+// . . . X . . .
+// 1 2 3 4 5 6 7
+```
+
+From `main.cpp:184-186`:
+```cpp
+else if (command == "display" || command == "d") {
+    pos.display();
+}
+```
+
+## Usage Example
+
+From `main.cpp:39-64`, here's a complete example of parsing moves and playing them:
+
+```cpp
+int parse_moves(Position& pos, const std::string& moves) {
+    int count = 0;
+    
+    for (char c : moves) {
+        // Check if character is a valid column digit (1-7)
+        if (c < '1' || c > '7') {
+            std::cerr << "Error: Invalid character '" << c << "' in move string\n";
+            return -1;
+        }
+        
+        // Convert '1'-'7' to 0-6 (C++ uses 0-indexed arrays)
+        int col = c - '1';
+        
+        // Check if column is playable
+        if (!pos.can_play(col)) {
+            std::cerr << "Error: Column " << (col + 1) << " is full\n";
+            return -1;
+        }
+        
+        // Make the move
+        pos.make_move(col);
+        count++;
+    }
+    
+    return count;
+}
+```

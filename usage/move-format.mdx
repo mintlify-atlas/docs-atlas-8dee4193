@@ -1,0 +1,213 @@
+---
+title: Move Format
+description: How moves are represented in Marlin
+---
+
+Marlin uses a simple, compact move notation where each move is represented by a single digit.
+
+## Basic Format
+
+Moves are digits **1-7**, each representing a column to drop a piece in:
+
+```
+  1 2 3 4 5 6 7
++---------------+
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
++---------------+
+```
+
+- `1` = Drop piece in leftmost column
+- `4` = Drop piece in center column
+- `7` = Drop piece in rightmost column
+
+<Note>
+Columns are numbered 1-7 for user input, but internally the code uses 0-6 indexing (source/src/main.cpp:50).
+</Note>
+
+## Move Sequences
+
+Multiple moves are written as consecutive digits with **no spaces**:
+
+```bash
+position 4433
+```
+
+This plays 4 moves:
+1. Player 1 drops in column 4
+2. Player 2 drops in column 4
+3. Player 1 drops in column 3
+4. Player 2 drops in column 3
+
+**Result:**
+```
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . O O . . . |  ← Player 2's pieces
+| . . X X . . . |  ← Player 1's pieces
++---------------+
+  1 2 3 4 5 6 7
+```
+
+## Players Alternate Automatically
+
+You don't specify which player makes each move — they alternate:
+
+- **Odd-numbered moves** (1st, 3rd, 5th...): Player 1 (shown as `X`)
+- **Even-numbered moves** (2nd, 4th, 6th...): Player 2 (shown as `O`)
+
+<CodeGroup>
+```bash Example 1
+> position 4
+Played 1 moves
+
+> display
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . X . . . |  ← Player 1
++---------------+
+  1 2 3 4 5 6 7
+```
+
+```bash Example 2
+> position 44
+Played 2 moves
+
+> display
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . O . . . |  ← Player 2
+| . . . X . . . |  ← Player 1
++---------------+
+  1 2 3 4 5 6 7
+```
+</CodeGroup>
+
+## Validation
+
+The move parser (source/src/main.cpp:39-64) performs two checks:
+
+### 1. Valid Column Number
+
+Only digits 1-7 are accepted:
+
+```bash
+> position 12345
+Played 5 moves
+
+> position 123x5
+Error: Invalid character 'x' in move string
+
+> position 1238
+Error: Invalid character '8' in move string
+```
+
+**Implementation** (source/src/main.cpp:43-47):
+```cpp
+if (c < '1' || c > '7') {
+    std::cerr << "Error: Invalid character '" << c << "' in move string\n";
+    return -1;
+}
+```
+
+### 2. Column Not Full
+
+Each column can hold at most 6 pieces:
+
+```bash
+> position 1111111
+Error: Column 1 is full
+```
+
+**Implementation** (source/src/main.cpp:52-56):
+```cpp
+if (!pos.can_play(col)) {
+    std::cerr << "Error: Column " << (col + 1) << " is full\n";
+    return -1;
+}
+```
+
+## Examples from README
+
+### Center Opening
+
+```bash
+> position 4
+Played 1 moves
+```
+
+Player 1 starts in the center — often considered the strongest opening move.
+
+### Stack and Respond
+
+```bash
+> position 4433221
+Played 7 moves
+```
+
+Breakdown:
+- Moves 1-2: Both players stack in column 4
+- Moves 3-4: Both players stack in column 3
+- Moves 5-6: Both players stack in column 2
+- Move 7: Player 1 plays in column 1
+
+```
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . O . . . . |
+| . O X O . . . |
+| X X X X . . . |
++---------------+
+  1 2 3 4 5 6 7
+```
+
+## Internal Representation
+
+While users enter columns as 1-7, Marlin internally uses 0-based indexing:
+
+**Conversion** (source/src/main.cpp:50):
+```cpp
+int col = c - '1';  // Convert '1'-'7' to 0-6
+```
+
+When displaying results, the engine converts back:
+
+```cpp
+std::cout << "bestmove " << (col + 1) << "\n";  // Convert 0-6 to 1-7
+```
+
+## Why This Format?
+
+This compact notation is:
+
+<CardGroup cols={2}>
+  <Card title="Fast to type" icon="keyboard">
+    `position 4433` beats `position col4 col4 col3 col3`
+  </Card>
+  <Card title="Easy to parse" icon="code">
+    Single character per move (source/src/main.cpp:42)
+  </Card>
+  <Card title="Unambiguous" icon="check">
+    Only one piece can be placed per column per turn
+  </Card>
+  <Card title="Standard" icon="book">
+    Similar format used by other Connect 4 solvers
+  </Card>
+</CardGroup>
+
+## Related
+
+- [CLI Commands](/usage/cli-commands) - Full command reference
+- [Understanding Scores](/usage/understanding-scores) - How to interpret solver output

@@ -1,0 +1,167 @@
+---
+title: Installation
+description: Build Marlin from source using CMake
+---
+
+## System Requirements
+
+Before building Marlin, ensure your system meets these requirements:
+
+- **C++17 compiler** (GCC 7+, Clang 5+, MSVC 2017+, or equivalent)
+- **CMake 3.16 or higher**
+- **Git** (to clone the repository)
+
+<Note>
+On Windows, you'll need **MinGW Makefiles** as the CMake generator. The build configuration specifically uses MinGW for compatibility.
+</Note>
+
+## Building from Source
+
+<Steps>
+  <Step title="Clone the repository">
+    First, clone the Marlin repository to your local machine:
+    
+    ```bash
+    git clone https://github.com/yourusername/marlin.git
+    cd marlin
+    ```
+  </Step>
+  
+  <Step title="Generate build files">
+    Use CMake to generate the build configuration. The project uses **MinGW Makefiles** on Windows:
+    
+    ```bash
+    cmake -B build -S . -G "MinGW Makefiles"
+    ```
+    
+    **Platform-specific notes:**
+    
+    <Tabs>
+      <Tab title="Windows (MinGW)">
+        ```bash
+        cmake -B build -S . -G "MinGW Makefiles"
+        ```
+      </Tab>
+      
+      <Tab title="Linux / macOS">
+        ```bash
+        cmake -B build -S .
+        ```
+        
+        The default Unix Makefiles generator will be used automatically.
+      </Tab>
+    </Tabs>
+    
+    This creates a `build/` directory with all necessary build files.
+  </Step>
+  
+  <Step title="Build the executable">
+    Compile the project using CMake's build command:
+    
+    ```bash
+    cmake --build build
+    ```
+    
+    This compiles all source files and produces the `marlin` executable in the `build/` directory.
+  </Step>
+  
+  <Step title="Verify installation">
+    Test that Marlin was built successfully:
+    
+    ```bash
+    ./build/marlin
+    ```
+    
+    You should see the Marlin welcome message:
+    
+    ```
+    Marlin Connect 4 Engine v0.1
+    Type 'help' for available commands.
+    
+    >
+    ```
+    
+    Type `quit` to exit.
+  </Step>
+</Steps>
+
+## Build Configuration
+
+Marlin's `CMakeLists.txt` is configured with the following settings:
+
+- **C++ Standard**: C++17 (required)
+- **Compiler Warnings**: Enabled for code quality
+  - MSVC: `/W4`
+  - GCC/Clang: `-Wall -Wextra -pedantic`
+- **Project Version**: 0.1.0
+
+### Project Structure
+
+The build system compiles these components:
+
+**Main executable** (`marlin`):
+- `src/main.cpp` - CLI interface
+- `src/position.cpp` - Bitboard position representation
+- `src/solver.cpp` - Negamax solver with alpha-beta pruning
+- `src/transposition.cpp` - Transposition table implementation
+
+**Test executable** (`marlin_tests`):
+- `tests/test_position.cpp` - Unit tests for position logic
+- `src/position.cpp` - Position implementation
+
+## Running Tests
+
+To run the test suite:
+
+```bash
+./build/marlin_tests
+```
+
+Tests verify the correctness of bitboard operations, move generation, and win detection.
+
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="CMake version error">
+    **Error**: `CMake 3.16 or higher is required`
+    
+    **Solution**: Upgrade CMake:
+    ```bash
+    # Ubuntu/Debian
+    sudo apt update
+    sudo apt install cmake
+    
+    # macOS
+    brew install cmake
+    
+    # Windows
+    # Download from https://cmake.org/download/
+    ```
+  </Accordion>
+  
+  <Accordion title="C++17 not supported">
+    **Error**: `unsupported option '-std=c++17'`
+    
+    **Solution**: Update your compiler:
+    - **GCC**: Version 7 or higher
+    - **Clang**: Version 5 or higher
+    - **MSVC**: Visual Studio 2017 or higher
+  </Accordion>
+  
+  <Accordion title="MinGW not found (Windows)">
+    **Error**: `Generator 'MinGW Makefiles' not found`
+    
+    **Solution**: Install MinGW-w64:
+    1. Download from [mingw-w64.org](https://www.mingw-w64.org/)
+    2. Add MinGW's `bin/` directory to your PATH
+    3. Verify with `g++ --version`
+  </Accordion>
+</AccordionGroup>
+
+## Next Steps
+
+Now that Marlin is installed, learn how to use it:
+
+<Card title="Quick Start Guide" icon="rocket" href="/quickstart">
+  Run your first Connect 4 analysis
+</Card>

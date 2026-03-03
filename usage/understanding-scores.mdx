@@ -1,0 +1,236 @@
+---
+title: Understanding Scores
+description: How to interpret Marlin's evaluation scores
+---
+
+When Marlin analyzes a position with the `go` command, it returns a **score** representing the game-theoretic value of the position.
+
+## Score Meaning
+
+Scores are shown from the **current player's perspective**:
+
+<CardGroup cols={3}>
+  <Card title="Positive" icon="plus" color="#16a34a">
+    Current player can force a win with perfect play
+  </Card>
+  <Card title="Zero" icon="equals" color="#6b7280">
+    Game will end in a draw with perfect play from both sides
+  </Card>
+  <Card title="Negative" icon="minus" color="#dc2626">
+    Opponent can force a win with perfect play
+  </Card>
+</CardGroup>
+
+<Note>
+From README.md lines 71-74: Positive scores mean the current player wins, zero means draw, and negative means the opponent wins.
+</Note>
+
+## Score Magnitude
+
+The **absolute value** of the score indicates how quickly a player can force the win:
+
+- **Higher positive score** = Faster win for current player
+- **Higher negative score** = Faster loss for current player
+- **Score near zero** = Game will last longer before conclusion
+
+### Example from README
+
+```bash
+> position 4433
+Played 4 moves
+
+> go
+Analyzing...
+  Column 1: score -18
+  Column 2: score 16
+  Column 3: score 18
+  Column 4: score -20
+  Column 5: score 16
+  Column 6: score -18
+  Column 7: score -18
+bestmove 3 score 18 (WIN)
+Nodes analyzed: 12847
+```
+
+**Interpretation:**
+- **Column 3 (score 18)**: Best move — forces a win in 18 half-moves
+- **Column 2 (score 16)**: Also winning, but takes 16 half-moves
+- **Column 5 (score 16)**: Another winning option
+- **Column 4 (score -20)**: Losing move — opponent wins in 20 half-moves
+- **Columns 1, 6, 7 (score -18)**: All lose in 18 half-moves
+
+<Warning>
+Playing column 4 would be a blunder! Even though all moves seem similar, column 4 leads to the fastest loss.
+</Warning>
+
+## Real Example Walkthrough
+
+Let's analyze the position after `4433`:
+
+```
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . . . . . . |
+| . . O O . . . |
+| . . X X . . . |
++---------------+
+  1 2 3 4 5 6 7
+```
+
+**Current player**: Player 1 (X)
+**Best move**: Column 3 with score 18
+
+This means:
+1. If Player 1 plays column 3, they can force a win
+2. The win will occur within 18 half-moves (9 more full turns)
+3. This assumes both players play perfectly from here
+
+## How Scores Are Calculated
+
+Marlin uses **Negamax with alpha-beta pruning** to compute scores (source/include/solver.hpp:1-39).
+
+### Negamax Property
+
+From source/include/solver.hpp:7-13:
+
+> In a two-player zero-sum game:
+> - What's good for me is bad for my opponent (and vice versa)
+> - The value of a position for player A = -(value for player B)
+
+This is why the code negates scores when recursing (source/src/main.cpp:120):
+
+```cpp
+// Get the score (negate because we're looking from opponent's view)
+int score = -solver.solve(next);
+```
+
+### Score Return Values
+
+From source/include/solver.hpp:50-57:
+
+```cpp
+/**
+ * solve - Find the game-theoretic value of a position.
+ * 
+ * @return      Score from current player's perspective
+ *              Positive = current player can force a win
+ *              Zero = draw with perfect play
+ *              Negative = opponent can force a win
+ */
+int solve(const Position& pos);
+```
+
+## Output Labels
+
+Marlin translates numeric scores into human-readable labels (source/src/main.cpp:132-135):
+
+```cpp
+std::string result;
+if (best_score > 0) result = "WIN";
+else if (best_score < 0) result = "LOSE";
+else result = "DRAW";
+```
+
+**Example outputs:**
+
+<CodeGroup>
+```bash Winning position
+bestmove 3 score 18 (WIN)
+```
+
+```bash Losing position
+bestmove 2 score -4 (LOSE)
+```
+
+```bash Draw position
+bestmove 4 score 0 (DRAW)
+```
+
+```bash Immediate win
+bestmove 4 score WIN (immediate)
+```
+</CodeGroup>
+
+<Info>
+Immediate wins are detected before running the solver (source/src/main.cpp:93-98), providing instant results.
+</Info>
+
+## Score Units: Half-Moves
+
+Scores represent **half-moves** (also called "ply" in game theory):
+
+- **1 half-move** = 1 player makes 1 move
+- **2 half-moves** = 1 full turn (both players move once)
+
+So a score of 18 means:
+- 18 half-moves = 9 full turns
+- Current player will win on their 9th move (after opponent's 9th response)
+
+## Comparing Scores
+
+When multiple moves are winning, choose based on:
+
+1. **Prefer positive over negative** (obviously!)
+2. **Among positive scores, prefer higher** (faster win)
+3. **Among negative scores, prefer higher** (slower loss — more chances for opponent to blunder)
+
+### Example Decision
+
+```bash
+  Column 2: score 16
+  Column 3: score 18
+  Column 5: score 16
+```
+
+**Best choice**: Column 3 (score 18) — forces the fastest win.
+
+**Also acceptable**: Columns 2 or 5 (score 16) — still winning, just slower.
+
+## Node Count
+
+The solver also reports how many positions were analyzed:
+
+```bash
+Nodes analyzed: 12847
+```
+
+This indicates:
+- Search tree size
+- Computational effort
+- Effectiveness of alpha-beta pruning
+
+<Tip>
+Lower node counts (with same result) mean better pruning efficiency. Center columns are tried first (source/include/solver.hpp:31-37) to maximize pruning.
+</Tip>
+
+## Advanced: Alpha-Beta Bounds
+
+From source/include/solver.hpp:26-27:
+
+> - **Alpha**: The BEST score the current player is guaranteed (lower bound)
+> - **Beta**: The WORST score the opponent will allow (upper bound)
+
+When `alpha >= beta`, the solver can prune (skip) entire branches of the game tree, dramatically reducing the number of nodes analyzed.
+
+## Related Concepts
+
+<CardGroup cols={2}>
+  <Card title="Negamax" icon="arrows-repeat">
+    Algorithm that simplifies minimax by always maximizing from current player's view (source/include/solver.hpp:4-13)
+  </Card>
+  <Card title="Alpha-Beta Pruning" icon="scissors">
+    Optimization that skips branches that can't affect the final decision (source/include/solver.hpp:15-29)
+  </Card>
+  <Card title="Transposition Table" icon="table">
+    Cache that stores previously computed positions to avoid redundant work (source/include/solver.hpp:89-90)
+  </Card>
+  <Card title="Move Ordering" icon="arrows-up-down">
+    Trying center columns first improves pruning effectiveness (source/include/solver.hpp:31-37)
+  </Card>
+</CardGroup>
+
+## Further Reading
+
+- [CLI Commands](/usage/cli-commands) - How to use the `go` command
+- [Move Format](/usage/move-format) - How to specify positions

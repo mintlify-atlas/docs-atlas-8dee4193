@@ -1,0 +1,246 @@
+---
+title: 'Bitboards'
+description: 'Learn how Marlin uses bitboard representation for ultra-fast board operations'
+---
+
+## What is a Bitboard?
+
+Instead of using a 2D array like `board[6][7]`, Marlin uses a single 64-bit integer (called a "bitboard") where each bit represents one cell on the board.
+
+<Info>
+Computers are **extremely fast** at bitwise operations (AND, OR, XOR, shifts). This lets us check for wins, make moves, and evaluate positions in just a few CPU instructions instead of loops.
+</Info>
+
+## The Bit Layout
+
+The 6x7 Connect 4 board is mapped to bits 0-48 of a 64-bit integer:
+
+```
+  Col 0    Col 1    Col 2    Col 3    Col 4    Col 5    Col 6
++--------+--------+--------+--------+--------+--------+--------+
+|  (6)   |  (13)  |  (20)  |  (27)  |  (34)  |  (41)  |  (48)  | <- Buffer row (always 0)
++--------+--------+--------+--------+--------+--------+--------+
+|   5    |   12   |   19   |   26   |   33   |   40   |   47   | <- Row 5 (top)
+|   4    |   11   |   18   |   25   |   32   |   39   |   46   |
+|   3    |   10   |   17   |   24   |   31   |   38   |   45   |
+|   2    |    9   |   16   |   23   |   30   |   37   |   44   |
+|   1    |    8   |   15   |   22   |   29   |   36   |   43   |
+|   0    |    7   |   14   |   21   |   28   |   35   |   42   | <- Row 0 (bottom)
++--------+--------+--------+--------+--------+--------+--------+
+```
+
+Each column uses 7 bits: 6 for actual rows + 1 "buffer" bit at the top.
+
+<Note>
+The buffer bit prevents false diagonal wins from wrapping around between columns.
+</Note>
+
+### Bit Index Formula
+
+The formula to convert board coordinates to bit index is:
+
+```cpp
+bit_index = col * 7 + row
+```
+
+**Examples:**
+- Cell (row=0, col=0) → bit 0
+- Cell (row=5, col=0) → bit 5  
+- Cell (row=0, col=1) → bit 7
+- Cell (row=2, col=3) → bit 23
+
+## The Two Core Bitboards
+
+Marlin uses two bitboards to represent the game state:
+
+### 1. The Mask Bitboard
+
+A bitboard where every **occupied cell** (by either player) has a 1.
+
+```cpp
+// From position.hpp:232-243
+uint64_t mask_;
+
+// If Red is at (0,0) and Yellow is at (0,1):
+//   mask = 0b...10000001 (bits 0 and 7 are set)
+```
+
+### 2. The Position Bitboard
+
+A bitboard showing only the **current player's** stones.
+
+```cpp
+// From position.hpp:245-251
+uint64_t position_;
+
+// We alternate players each turn. By XORing mask and position,
+// we can get the opponent's stones:
+uint64_t opponent = mask ^ position;
+```
+
+## Helper Mask Functions
+
+Marlin provides several helper functions to work with bitboards:
+
+### Bottom Mask
+
+Returns a bitboard with a single 1 at the bottom of a given column:
+
+```cpp
+// From position.hpp:76-78
+static constexpr uint64_t bottom_mask(int col) {
+    return 1ULL << (col * (HEIGHT + 1));
+}
+
+// Example: bottom_mask(0) returns 0b...0001 (bit 0)
+// Example: bottom_mask(3) returns bit 21 set
+```
+
+### Column Mask
+
+Returns a bitboard with 1s in all playable cells of a column:
+
+```cpp
+// From position.hpp:87-89
+static constexpr uint64_t column_mask(int col) {
+    return ((1ULL << HEIGHT) - 1) << (col * (HEIGHT + 1));
+}
+
+// Example: column_mask(0) returns bits 0-5 set
+// Example: column_mask(1) returns bits 7-12 set
+```
+
+### Top Mask
+
+Returns a bitboard with a single 1 at the top playable cell (row 5):
+
+```cpp
+// From position.hpp:97-99
+static constexpr uint64_t top_mask(int col) {
+    return 1ULL << ((HEIGHT - 1) + col * (HEIGHT + 1));
+}
+
+// Used for checking if a column is full
+```
+
+## The Gravity Trick
+
+One of the most elegant parts of bitboard representation is how moves are made. Instead of looping to find the first empty row, Marlin uses **binary addition**.
+
+<Tip>
+This is one of the key optimizations that makes bitboards so fast!
+</Tip>
+
+### How It Works
+
+From `position.hpp:138-161`:
+
+```cpp
+void make_move(int col) {
+    // Step 1: Get just this column's bits from the mask
+    uint64_t col_bits = mask_ & column_mask(col);
+    
+    // Step 2: Add the bottom bit of the column
+    uint64_t new_piece = col_bits + bottom_mask(col);
+    
+    // The magic: Adding 1 to a sequence of 1s causes a "carry"
+    // that propagates up until it hits a 0!
+}
+```
+
+### The Magic of Binary Addition
+
+Adding 1 to a sequence of 1s causes a "carry" that propagates up until it hits a 0:
+
+```
+Example (column 0, with 2 pieces already):
+  mask for col0:   0b0000011  (rows 0 and 1 occupied)
+  bottom_mask(0):  0b0000001  (row 0)
+  Sum:             0b0000100  (the 1 "carried" up to row 2!)
+```
+
+The result has a 1 exactly where the new piece should go!
+
+## Win Detection with Bitshifts
+
+To check for 4-in-a-row, Marlin shifts the bitboard against itself and ANDs the results. If we get a non-zero result, there's a 4-in-a-row!
+
+From `position.hpp:192-217`:
+
+### Horizontal Wins
+
+Shift by 7 (one column apart):
+
+```cpp
+uint64_t m = pos & (pos >> 7);    // Find adjacent pairs
+if (m & (m >> 14)) {              // Check if two pairs are adjacent
+    // 4 in a row horizontally!
+}
+```
+
+### Vertical Wins
+
+Shift by 1 (one row apart):
+
+```cpp
+uint64_t m = pos & (pos >> 1);
+if (m & (m >> 2)) {
+    // 4 in a row vertically!
+}
+```
+
+### Diagonal Wins (/)
+
+Shift by 8 (one row + one column):
+
+```cpp
+uint64_t m = pos & (pos >> 8);
+if (m & (m >> 16)) {
+    // 4 in a row diagonally /
+}
+```
+
+### Diagonal Wins (\)
+
+Shift by 6 (one row - one column):
+
+```cpp
+uint64_t m = pos & (pos >> 6);
+if (m & (m >> 12)) {
+    // 4 in a row diagonally \
+}
+```
+
+## Position Key Generation
+
+The `key()` function generates a unique identifier for each position, used by the [transposition table](/concepts/transposition-tables):
+
+```cpp
+// From position.hpp:189
+uint64_t key() const { 
+    return position_ + mask_ + BOTTOM_MASK; 
+}
+```
+
+<Info>
+This formula cleverly encodes both the stone positions **and** whose turn it is in a single 64-bit integer.
+</Info>
+
+Two identical board positions (same pieces in same places, same player's turn) will always have the same key.
+
+## Why Bitboards Are Fast
+
+1. **Single CPU instructions**: Bitwise operations (AND, OR, XOR, shifts) are single-cycle operations on modern CPUs
+2. **Cache-friendly**: Two 64-bit integers fit in a single cache line
+3. **No loops needed**: Win detection happens in constant time with bit shifts
+4. **The gravity trick**: Making a move is just one addition operation
+5. **Parallel operations**: A single bitwise operation can check multiple cells simultaneously
+
+<Tip>
+Bitboards are why Marlin can evaluate millions of positions per second.
+</Tip>
+
+## Related Concepts
+
+- [Transposition Tables](/concepts/transposition-tables) - How position keys are used for caching
+- [Negamax Algorithm](/concepts/negamax) - The search algorithm that uses these bitboards

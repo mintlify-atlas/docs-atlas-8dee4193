@@ -1,0 +1,357 @@
+---
+title: 'Transposition Tables'
+description: 'Learn how Marlin caches evaluated positions to avoid redundant computation'
+---
+
+## What is a Transposition Table?
+
+From `transposition.hpp:4-14`, a transposition table is a **cache (hash table) that stores positions we've already evaluated**.
+
+<Info>
+In Connect 4, the same position can be reached by different move sequences (a "transposition").
+</Info>
+
+### Example Transposition
+
+```
+Sequence A: Play column 1, then 2, then 3
+    ↓
+[Position X]
+    ↑
+Sequence B: Play column 3, then 2, then 1
+```
+
+Both sequences lead to the identical board state!
+
+If we've already computed the value of this position via sequence A, we can **skip the entire subtree** when we reach it via sequence B.
+
+<Tip>
+This is one of the most important optimizations in game tree search. Without it, Marlin would be orders of magnitude slower.
+</Tip>
+
+## Unique Position Keys
+
+From `transposition.hpp:16-25`, each position needs a unique identifier:
+
+```cpp
+// From position.hpp:189
+uint64_t key() const { 
+    return position_ + mask_ + BOTTOM_MASK; 
+}
+```
+
+### Why This Formula Works
+
+The key encodes:
+
+1. **position_**: Where the current player's pieces are
+2. **mask_**: Where all pieces are (both players)
+3. **BOTTOM_MASK**: A constant that helps distinguish whose turn it is
+
+<Note>
+Two positions are identical if they have the same pieces in the same places **and** it's the same player's turn. This formula captures both!
+</Note>
+
+### Example Key Calculation
+
+```cpp
+// Position with:
+//   Current player: pieces at bits 0, 7, 14
+//   Opponent: pieces at bits 1, 8
+
+position_ = 0b...100000010000001  // Bits 0, 7, 14
+mask_     = 0b...110000110000011  // Bits 0, 1, 7, 8, 14
+BOTTOM_MASK = 0b...100000001000001  // Pre-computed constant
+
+key = position_ + mask_ + BOTTOM_MASK
+    = unique 64-bit integer
+```
+
+<Info>
+No need for complex Zobrist hashing in Connect 4 - this simple addition works perfectly!
+</Info>
+
+## Table Structure
+
+From `transposition.hpp:44-86`, the table is implemented as a simple array:
+
+```cpp
+class TranspositionTable {
+private:
+    struct Entry {
+        uint64_t key = 0;   // Position key (0 means empty)
+        int8_t value = 0;   // Stored score
+    };
+
+    std::vector<Entry> table_;
+    size_t size_;
+
+    // Helper to compute index from key
+    size_t index(uint64_t key) const { 
+        return key % size_; 
+    }
+};
+```
+
+### Table Size
+
+```cpp
+// From transposition.hpp:52
+explicit TranspositionTable(size_t size = 8388608);  // 2^23 = 8M entries
+```
+
+Default size: **8 million entries** (~64 MB of memory)
+
+<Note>
+Each entry stores:
+- 64-bit key (8 bytes)
+- 8-bit value (1 byte)
+- Total: ~9 bytes per entry
+</Note>
+
+## Storing Positions
+
+From `transposition.hpp:56-60`:
+
+```cpp
+void put(uint64_t key, int8_t value);
+
+// Implementation stores the position at index = key % size
+```
+
+In practice (from `solver.cpp:118-121`):
+
+```cpp
+// After evaluating a position
+tt_.put(key, static_cast<int8_t>(
+    alpha - Position::WIDTH * Position::HEIGHT / 2 + 1
+));
+```
+
+### Value Encoding
+
+Scores are stored as **relative values** (normalized around zero) to save space (8-bit storage).
+
+## Retrieving Positions
+
+From `transposition.hpp:63-68`:
+
+```cpp
+int8_t get(uint64_t key) const;
+
+// Returns:
+//   - The stored value if found
+//   - 0 if not found
+```
+
+From `solver.cpp:60-74`, lookup and use:
+
+```cpp
+uint64_t key = pos.key();
+int8_t cached_value = tt_.get(key);
+
+if (cached_value != 0) {
+    // We found a cached upper bound for this position!
+    // The cached value is an upper bound on the true score
+    int max_from_cache = cached_value + 
+        Position::WIDTH * Position::HEIGHT / 2 - 1;
+    
+    if (beta > max_from_cache) {
+        beta = max_from_cache;
+        if (alpha >= beta) return beta;  // Prune with cached info!
+    }
+}
+```
+
+<Info>
+Cached values help **tighten alpha-beta bounds**, leading to more pruning without additional search!
+</Info>
+
+## Collision Handling
+
+From `transposition.hpp:34-35`:
+
+<Note>
+We use `key % table_size` as the index. Collisions are handled by **replacement** - newer entries overwrite older ones at the same index.
+</Note>
+
+### Why Replacement Works
+
+In a game tree search:
+
+1. **Newer positions are often more relevant** to the current search
+2. If we lose an old entry, we might recompute it, but it's rare
+3. The table is large enough that collisions are infrequent
+
+### Collision Example
+
+```
+Position A has key = 12345678
+Position B has key = 20734286
+
+index_A = 12345678 % 8388608 = 3756070
+index_B = 20734286 % 8388608 = 3756070  // Collision!
+
+Timeline:
+1. Store A at index 3756070
+2. Store B at index 3756070 (overwrites A)
+3. Lookup A → Not found (returns 0)
+4. Recompute A if needed
+```
+
+The cost of occasional recomputation is worth the simplicity and speed of this scheme.
+
+## Integration with Negamax
+
+Here's the complete flow in `solver.cpp:37-124`:
+
+```cpp
+int Solver::negamax(Position pos, int alpha, int beta) {
+    node_count_++;
+
+    // BASE CASES (immediate win, draw)
+    // ...
+
+    // -------------------------
+    // TRANSPOSITION TABLE LOOKUP
+    // -------------------------
+    uint64_t key = pos.key();
+    int8_t cached_value = tt_.get(key);
+    
+    if (cached_value != 0) {
+        // Use cached value to narrow search bounds
+        int max_from_cache = cached_value + 
+            Position::WIDTH * Position::HEIGHT / 2 - 1;
+        if (beta > max_from_cache) {
+            beta = max_from_cache;
+            if (alpha >= beta) return beta;  // Early exit!
+        }
+    }
+
+    // Window tightening optimization
+    // ...
+
+    // -------------------------
+    // RECURSIVE SEARCH
+    // -------------------------
+    for (int i = 0; i < Position::WIDTH; i++) {
+        int col = COLUMN_ORDER[i];
+        if (pos.can_play(col)) {
+            Position next = pos;
+            next.make_move(col);
+            int score = -negamax(next, -beta, -alpha);
+            
+            if (score >= beta) return score;
+            if (score > alpha) alpha = score;
+        }
+    }
+
+    // -------------------------
+    // TRANSPOSITION TABLE STORE
+    // -------------------------
+    tt_.put(key, static_cast<int8_t>(
+        alpha - Position::WIDTH * Position::HEIGHT / 2 + 1
+    ));
+
+    return alpha;
+}
+```
+
+### The Two-Phase Process
+
+1. **Lookup Phase** (before search):
+   - Check if position was evaluated before
+   - Use cached value to tighten bounds
+   - Potentially prune without searching
+
+2. **Store Phase** (after search):
+   - Save the computed value
+   - Help future searches
+
+## Performance Impact
+
+Without transposition tables:
+```
+Same positions evaluated multiple times
+Redundant work on transpositions
+```
+
+With transposition tables:
+```
+Each unique position evaluated at most once
+Cached values improve alpha-beta pruning
+Dramatic speedup (often 10-100x)
+```
+
+<Tip>
+For the Connect 4 starting position, the transposition table typically reduces the search from millions of nodes to tens of thousands.
+</Tip>
+
+## Table Management
+
+From `transposition.hpp:70-73`:
+
+```cpp
+void reset();
+
+// Clear all entries (for starting a new game)
+```
+
+You typically reset the table:
+- When starting a completely new game
+- When switching between different analysis tasks
+- To free memory (though usually not necessary)
+
+## Memory Usage
+
+Default configuration:
+
+```
+8,388,608 entries × 9 bytes/entry ≈ 75 MB
+```
+
+You can adjust the size at construction:
+
+```cpp
+// Smaller table (2^20 entries ≈ 9 MB)
+TranspositionTable tt(1048576);
+
+// Larger table (2^25 entries ≈ 300 MB)
+TranspositionTable tt(33554432);
+```
+
+<Info>
+Larger tables have fewer collisions but use more memory. 8M entries is a good balance for most use cases.
+</Info>
+
+## Why It's Called "Transposition"
+
+The term comes from chess, where the same position can be reached by different move orders:
+
+```
+Chess example:
+  1. e4 e5 2. Nf3 Nc6
+  1. Nf3 Nc6 2. e4 e5
+  
+  → Same position, different move order
+```
+
+In Connect 4:
+```
+Columns: 3, 2, 4
+Columns: 2, 4, 3
+Columns: 4, 3, 2
+
+→ All lead to pieces in columns 2, 3, 4
+```
+
+<Note>
+The positions have been "transposed" - rearranged to the same configuration.
+</Note>
+
+## Related Concepts
+
+- [Negamax Algorithm](/concepts/negamax) - The search algorithm that uses transposition tables
+- [Alpha-Beta Pruning](/concepts/alpha-beta-pruning) - How cached values improve pruning
+- [Bitboards](/concepts/bitboards) - How position keys are computed efficiently
+- [Move Ordering](/concepts/move-ordering) - Another optimization that works with transposition tables

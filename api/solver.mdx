@@ -1,0 +1,248 @@
+---
+title: 'Solver Class'
+description: 'Negamax solver with alpha-beta pruning for perfect Connect 4 play'
+---
+
+The `Solver` class implements a Negamax algorithm with alpha-beta pruning to find the optimal move in any Connect 4 position. It can determine whether a position is winning, losing, or drawn with perfect play.
+
+## Overview
+
+### What is Negamax?
+
+Negamax is a variant of the Minimax algorithm for zero-sum games. Instead of alternating between maximizing and minimizing players, Negamax always maximizes from the current player's perspective by negating the score when recursing to the opponent's turn.
+
+Key principle: The value of a position for player A = -(value for player B)
+
+### What is Alpha-Beta Pruning?
+
+Alpha-Beta is an optimization that skips branches that won't affect the final decision:
+
+- **Alpha**: The best score the current player is guaranteed (lower bound)
+- **Beta**: The worst score the opponent will allow (upper bound)
+- If `alpha >= beta`, we can prune (skip) the rest of the branch
+
+This can reduce the search space exponentially while guaranteeing the same result as full Minimax.
+
+### Move Ordering
+
+Alpha-Beta works best when good moves are found first. In Connect 4, center columns typically offer more winning opportunities, so the solver tries them first using the `COLUMN_ORDER` constant.
+
+## Constants
+
+### COLUMN_ORDER
+```cpp
+static constexpr int COLUMN_ORDER[7] = {3, 2, 4, 1, 5, 0, 6};
+```
+Defines the order in which columns are evaluated, from center to edges (0-indexed).
+
+**Order:** Column 3 (center), then 2, 4, 1, 5, 0, 6 (edges)
+
+This ordering improves alpha-beta pruning efficiency by finding strong moves early.
+
+## Public Methods
+
+### solve()
+```cpp
+int solve(const Position& pos);
+```
+Finds the game-theoretic value of a position assuming both players play perfectly.
+
+<ParamField path="pos" type="const Position&">
+  The position to analyze
+</ParamField>
+
+**Returns:** `int` - Score from the current player's perspective:
+- **Positive**: Current player can force a win
+- **Zero**: Game is a draw with perfect play
+- **Negative**: Opponent can force a win
+
+**Score Interpretation:**
+The magnitude indicates how many moves until the game ends. For example:
+- `+10`: Current player wins in 10 moves
+- `-5`: Opponent wins in 5 moves
+- `0`: Perfect play leads to a draw
+
+**Example:**
+```cpp
+Position pos;
+Solver solver;
+
+// Set up some position
+pos.make_move(3);
+pos.make_move(3);
+
+// Solve the position
+int score = solver.solve(pos);
+
+if (score > 0) {
+    std::cout << "Winning position!\n";
+} else if (score < 0) {
+    std::cout << "Losing position!\n";
+} else {
+    std::cout << "Draw with perfect play!\n";
+}
+```
+
+From `main.cpp:107-139`, here's how `solve()` is used to find the best move:
+
+```cpp
+Solver solver;
+int best_col = -1;
+int best_score = -1000;
+
+std::cout << "Analyzing...\n";
+
+for (int col = 0; col < Position::WIDTH; col++) {
+    if (pos.can_play(col)) {
+        // Try this move
+        Position next = pos;
+        next.make_move(col);
+
+        // Get the score (negate because we're looking from opponent's view)
+        int score = -solver.solve(next);
+
+        std::cout << "  Column " << (col + 1) << ": score " << score << "\n";
+
+        if (score > best_score) {
+            best_score = score;
+            best_col = col;
+        }
+    }
+}
+
+// Output result
+std::string result;
+if (best_score > 0) result = "WIN";
+else if (best_score < 0) result = "LOSE";
+else result = "DRAW";
+
+std::cout << "bestmove " << (best_col + 1) << " score " << best_score 
+          << " (" << result << ")\n";
+std::cout << "Nodes analyzed: " << solver.get_node_count() << "\n";
+```
+
+### get_node_count()
+```cpp
+unsigned long long get_node_count() const;
+```
+Returns the number of positions analyzed during the most recent solve operation.
+
+**Returns:** `unsigned long long` - Total nodes visited
+
+**Use cases:**
+- Benchmarking solver performance
+- Understanding search depth
+- Analyzing pruning efficiency
+
+**Example:**
+```cpp
+Solver solver;
+solver.solve(pos);
+std::cout << "Positions analyzed: " << solver.get_node_count() << std::endl;
+```
+
+From `main.cpp:139`:
+```cpp
+std::cout << "Nodes analyzed: " << solver.get_node_count() << "\n";
+```
+
+### reset_node_count()
+```cpp
+void reset_node_count();
+```
+Resets the node counter to zero. Call this before each solve operation if you want to measure a single search.
+
+**Example:**
+```cpp
+Solver solver;
+
+// First analysis
+solver.reset_node_count();
+solver.solve(pos1);
+std::cout << "First solve: " << solver.get_node_count() << " nodes\n";
+
+// Second analysis
+solver.reset_node_count();
+solver.solve(pos2);
+std::cout << "Second solve: " << solver.get_node_count() << " nodes\n";
+```
+
+## Complete Usage Example
+
+Here's the complete `handle_go()` function from `main.cpp` that demonstrates all solver functionality:
+
+```cpp
+void handle_go(Position& pos) {
+    // Check for immediate wins first (fast path)
+    for (int col = 0; col < Position::WIDTH; col++) {
+        if (pos.can_play(col) && pos.is_winning_move(col)) {
+            std::cout << "bestmove " << (col + 1) << " score WIN (immediate)\n";
+            return;
+        }
+    }
+    
+    // Check if game is already over
+    if (pos.nb_moves() == Position::WIDTH * Position::HEIGHT) {
+        std::cout << "Game is a draw - no moves available\n";
+        return;
+    }
+
+    // Use the solver to find the best move
+    Solver solver;
+    int best_col = -1;
+    int best_score = -1000;
+
+    std::cout << "Analyzing...\n";
+
+    for (int col = 0; col < Position::WIDTH; col++) {
+        if (pos.can_play(col)) {
+            // Try this move
+            Position next = pos;
+            next.make_move(col);
+
+            // Get the score (negate because we're looking from opponent's view)
+            int score = -solver.solve(next);
+
+            std::cout << "  Column " << (col + 1) << ": score " << score << "\n";
+
+            if (score > best_score) {
+                best_score = score;
+                best_col = col;
+            }
+        }
+    }
+
+    // Output result
+    std::string result;
+    if (best_score > 0) result = "WIN";
+    else if (best_score < 0) result = "LOSE";
+    else result = "DRAW";
+
+    std::cout << "bestmove " << (best_col + 1) << " score " << best_score 
+              << " (" << result << ")\n";
+    std::cout << "Nodes analyzed: " << solver.get_node_count() << "\n";
+}
+```
+
+## Performance Considerations
+
+- The solver uses a `TranspositionTable` internally to cache position evaluations
+- Move ordering via `COLUMN_ORDER` significantly improves pruning efficiency
+- Alpha-beta pruning can reduce the search space by orders of magnitude
+- The node count helps measure the effectiveness of these optimizations
+
+## Implementation Details
+
+The solver uses a private `negamax()` method that implements the core recursive search:
+
+```cpp
+int negamax(Position pos, int alpha, int beta);
+```
+
+This method:
+1. Checks the transposition table for cached results
+2. Evaluates terminal positions (wins/draws)
+3. Recursively explores moves in `COLUMN_ORDER`
+4. Updates alpha/beta bounds
+5. Prunes branches when `alpha >= beta`
+6. Caches the result in the transposition table

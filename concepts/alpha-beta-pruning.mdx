@@ -1,0 +1,301 @@
+---
+title: 'Alpha-Beta Pruning'
+description: 'Learn how Marlin skips exploring large portions of the game tree'
+---
+
+## What is Alpha-Beta Pruning?
+
+Alpha-Beta is an optimization that **skips branches we don't need to explore**. From `solver.hpp:15-29`:
+
+<Info>
+Imagine you're evaluating move A, and you find it gives you a score of +5. Now you're evaluating move B. You discover that no matter what you do in B, your opponent can force a score of +3 (worse than A).
+
+You can **STOP exploring B immediately!** You already have a better option (A).
+</Info>
+
+## Alpha and Beta Bounds
+
+Two values track the search window:
+
+```cpp
+// From solver.cpp:84
+int negamax(Position pos, int alpha, int beta)
+```
+
+### Alpha: Lower Bound
+
+**Alpha** is the **best score the current player is guaranteed** so far.
+
+- Starts at the worst possible value
+- Increases as we find better moves
+- Represents: "I can do at least this well"
+
+### Beta: Upper Bound
+
+**Beta** is the **worst score the opponent will allow**.
+
+- Starts at the best possible value
+- Decreases as we explore opponent's options
+- Represents: "My opponent won't let me do better than this"
+
+<Note>
+When alpha >= beta, we can **prune** (skip) the rest of the current branch.
+</Note>
+
+## Initial Bounds
+
+From `solver.cpp:17-24`:
+
+```cpp
+int Solver::solve(const Position& pos) {
+    // Initial bounds:
+    // alpha = can't be worse than losing on the very last possible move
+    // beta = can't be better than winning on the next move
+    int alpha = -(Position::WIDTH * Position::HEIGHT) / 2;
+    int beta = (Position::WIDTH * Position::HEIGHT + 1) / 2;
+    
+    return negamax(pos, alpha, beta);
+}
+```
+
+These represent the theoretical worst and best possible game outcomes.
+
+## The Pruning Condition
+
+From `solver.cpp:103-107`:
+
+```cpp
+int score = -negamax(next, -beta, -alpha);
+
+// ALPHA-BETA PRUNING CHECK
+if (score >= beta) {
+    // This move is "too good" - opponent won't allow this line
+    return score;  // Fail-high (beta cutoff)
+}
+```
+
+When `score >= beta`, we've found a move that's **too good to be true**. The opponent had an earlier choice that avoids this position, so we stop searching.
+
+## How Pruning Works: Example
+
+Let's walk through a concrete example:
+
+```
+        Root (Our turn, alpha=-∞, beta=+∞)
+         /    |    \
+        /     |     \
+      Move1 Move2 Move3
+```
+
+### Evaluating Move 1
+
+```
+Move1 (Opponent's turn, alpha=-∞, beta=+∞)
+  ├─ Opponent plays A → Returns -5 (bad for us)
+  ├─ Opponent plays B → Returns -2 (less bad)
+  └─ Opponent plays C → Returns -3
+
+Move1 returns: -2 (opponent's best = our worst)
+Our alpha is now: -2 (we're guaranteed at least this)
+```
+
+### Evaluating Move 2
+
+```
+Move2 (Opponent's turn, alpha=-2, beta=+∞)
+  ├─ Opponent plays A → Returns +3 (good for us!)
+  └─ ...
+
+Move2 returns: +3
+Our alpha is now: +3 (we found something better!)
+```
+
+### Evaluating Move 3 (The Pruning)
+
+```
+Move3 (Opponent's turn, alpha=+3, beta=+∞)
+  ├─ Opponent plays A → Returns -5 (bad for us)
+  └─ Since -5 < alpha (+3), opponent will choose this
+     
+     We already have Move2 which guarantees +3.
+     No need to explore Move3 further!
+     **PRUNE**
+```
+
+<Tip>
+The more we prune, the faster the solver runs. Good move ordering maximizes pruning opportunities.
+</Tip>
+
+## Beta Cutoffs in Marlin
+
+Marlin implements the fail-high cutoff:
+
+```cpp
+// From solver.cpp:102-107
+int score = -negamax(next, -beta, -alpha);
+
+if (score >= beta) {
+    // This move is "too good" - opponent won't allow this line
+    // We can stop searching this branch entirely!
+    return score;  // Fail-high (beta cutoff)
+}
+```
+
+This is called a **"beta cutoff"** or **"fail-high"** - we've exceeded our upper bound.
+
+## Alpha Updates
+
+When we find a better move (but not good enough to prune):
+
+```cpp
+// From solver.cpp:110-112
+if (score > alpha) {
+    alpha = score;  // Update our guaranteed minimum
+}
+```
+
+Alpha gradually increases as we find better moves.
+
+## Transposition Table Integration
+
+Marlin uses the transposition table to improve alpha-beta:
+
+```cpp
+// From solver.cpp:63-74
+uint64_t key = pos.key();
+int8_t cached_value = tt_.get(key);
+
+if (cached_value != 0) {
+    // We found a cached upper bound for this position
+    int max_from_cache = cached_value + Position::WIDTH * Position::HEIGHT / 2 - 1;
+    if (beta > max_from_cache) {
+        beta = max_from_cache;
+        if (alpha >= beta) return beta;  // Prune with cached info!
+    }
+}
+```
+
+<Info>
+Cached positions can tighten our bounds, leading to **more pruning** without additional search!
+</Info>
+
+## Window Tightening Optimization
+
+Marlin includes an additional optimization:
+
+```cpp
+// From solver.cpp:78-85
+// We can't do better than winning in 2 moves (since we already checked
+// for immediate wins above). This helps prune more branches.
+int max_possible = (Position::WIDTH * Position::HEIGHT - 1 - pos.nb_moves()) / 2;
+if (beta > max_possible) {
+    beta = max_possible;
+    if (alpha >= beta) return beta;  // Prune!
+}
+```
+
+This uses game-specific knowledge to tighten the beta bound further.
+
+## Why Move Ordering Matters
+
+From `solver.hpp:31-37`:
+
+<Note>
+Alpha-Beta works best when we find **good moves first**. In Connect 4, center columns are usually better (more winning opportunities), so we try them first.
+</Note>
+
+If we find a strong move early:
+1. Alpha increases quickly
+2. The window (beta - alpha) becomes smaller
+3. More branches can be pruned
+
+Example comparison:
+
+```
+Bad ordering (worst moves first):
+  - Alpha stays low
+  - Few cutoffs
+  - Must explore most branches
+  
+Good ordering (best moves first):
+  - Alpha increases quickly  
+  - Many early cutoffs
+  - Can skip most branches
+```
+
+<Tip>
+With optimal move ordering, alpha-beta can reduce the search space from O(b^d) to O(b^(d/2)), where b is the branching factor and d is depth!
+</Tip>
+
+## The Move Loop with Pruning
+
+Here's the complete loop from `solver.cpp:90-114`:
+
+```cpp
+// Try all moves with alpha-beta pruning
+for (int i = 0; i < Position::WIDTH; i++) {
+    int col = COLUMN_ORDER[i];  // Try center columns first
+    
+    if (pos.can_play(col)) {
+        // Create a copy and make the move
+        Position next = pos;
+        next.make_move(col);
+
+        // Recursively evaluate from opponent's perspective
+        // Note: We negate and swap alpha/beta bounds
+        int score = -negamax(next, -beta, -alpha);
+
+        // ALPHA-BETA PRUNING CHECK
+        if (score >= beta) {
+            // This move is "too good" - opponent won't allow this line
+            return score;  // Fail-high (beta cutoff)
+        }
+
+        // Update alpha (our guaranteed minimum score)
+        if (score > alpha) {
+            alpha = score;
+        }
+    }
+}
+
+return alpha;
+```
+
+## Performance Impact
+
+Without alpha-beta pruning:
+```
+Positions evaluated: ~4.5 × 10^12 (from start position)
+```
+
+With alpha-beta pruning + move ordering:
+```
+Positions evaluated: ~67,000 (from start position)
+```
+
+<Info>
+That's a reduction of **over 8 orders of magnitude!**
+</Info>
+
+Combined with [transposition tables](/concepts/transposition-tables), Marlin can solve most positions in milliseconds.
+
+## Storing Results
+
+After the search completes, Marlin stores the result:
+
+```cpp
+// From solver.cpp:118-121
+// Store the result for future use
+tt_.put(key, static_cast<int8_t>(
+    alpha - Position::WIDTH * Position::HEIGHT / 2 + 1
+));
+```
+
+This helps prune **future searches** that reach this position via a different path.
+
+## Related Concepts
+
+- [Negamax Algorithm](/concepts/negamax) - The base search algorithm that alpha-beta optimizes
+- [Move Ordering](/concepts/move-ordering) - Critical for maximizing pruning effectiveness  
+- [Transposition Tables](/concepts/transposition-tables) - How cached values improve bounds
+- [Bitboards](/concepts/bitboards) - Fast operations that make deep search practical

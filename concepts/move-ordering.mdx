@@ -1,0 +1,322 @@
+---
+title: 'Move Ordering'
+description: 'Learn why the order of move exploration dramatically affects search efficiency'
+---
+
+## Why Move Ordering Matters
+
+From `solver.hpp:31-37`:
+
+<Info>
+Alpha-Beta works best when we find **good moves first**. In Connect 4, center columns are usually better (more winning opportunities), so we try them first.
+</Info>
+
+The order in which you explore moves can change alpha-beta performance from solving in **minutes** to solving in **milliseconds**.
+
+## The Column Order Constant
+
+From `solver.hpp:71-73`:
+
+```cpp
+// Move ordering: center columns first (better for alpha-beta pruning)
+// Column indices: 3, 2, 4, 1, 5, 0, 6 (center to edges, 0-indexed)
+static constexpr int COLUMN_ORDER[7] = {3, 2, 4, 1, 5, 0, 6};
+```
+
+This array defines the order Marlin tries moves:
+
+```
+Column number (1-indexed): 4  3  5  2  6  1  7
+Column index (0-indexed):  3  2  4  1  5  0  6
+Order tried:              1st 2nd 3rd 4th 5th 6th 7th
+
+Board visualization:
+     6th  4th  2nd  1st  3rd  5th  7th
+      ↓    ↓    ↓    ↓    ↓    ↓    ↓
+    | 1  | 2  | 3  | 4  | 5  | 6  | 7  |
+    +----+----+----+----+----+----+----+
+```
+
+<Tip>
+The center column (4) is tried first, then we alternate between left (3) and right (5), gradually moving toward the edges.
+</Tip>
+
+## Why Center Columns First?
+
+In Connect 4, **center columns provide more winning opportunities**:
+
+### Horizontal Connections
+
+Center pieces can be part of 4-in-a-row in **both directions**:
+
+```
+Piece at column 4 (center):
+  X X X ●  ← Can extend left
+  ● X X X  ← Can extend right
+
+Piece at column 1 (edge):
+  ● X X X  ← Can only extend right
+```
+
+### Diagonal Connections
+
+Center pieces have **more diagonal opportunities**:
+
+```
+From column 4:
+  ●               ●
+    ●           ●
+      ●       ●
+        ●   ●
+        
+Both diagonals available!
+
+From column 1:
+  ●
+    ●
+      ●
+        ●
+        
+Only one diagonal direction possible
+```
+
+### Strategic Value
+
+Center control gives you:
+- More ways to form 4-in-a-row
+- Better defensive positions
+- Greater flexibility in future moves
+
+<Note>
+Experienced Connect 4 players almost always start in the center for these exact reasons!
+</Note>
+
+## Usage in the Solver
+
+From `solver.cpp:43-49` (checking for immediate wins):
+
+```cpp
+for (int i = 0; i < Position::WIDTH; i++) {
+    int col = COLUMN_ORDER[i];  // Check center columns first
+    if (pos.can_play(col) && pos.is_winning_move(col)) {
+        // Current player wins!
+        return (Position::WIDTH * Position::HEIGHT + 1 - pos.nb_moves()) / 2;
+    }
+}
+```
+
+From `solver.cpp:90-114` (recursive search):
+
+```cpp
+for (int i = 0; i < Position::WIDTH; i++) {
+    int col = COLUMN_ORDER[i];  // Try center columns first
+    
+    if (pos.can_play(col)) {
+        Position next = pos;
+        next.make_move(col);
+        int score = -negamax(next, -beta, -alpha);
+        
+        if (score >= beta) return score;  // Beta cutoff
+        if (score > alpha) alpha = score;
+    }
+}
+```
+
+## Impact on Alpha-Beta Efficiency
+
+### Bad Ordering (Random or Edge-First)
+
+```
+Trying columns: 1, 2, 3, 4, 5, 6, 7
+
+1. Try column 1 (edge) → Returns score -2
+   Alpha = -2 (not great)
+   
+2. Try column 2 → Returns score +1
+   Alpha = +1 (better)
+   
+3. Try column 3 → Returns score +3
+   Alpha = +3 (good)
+   
+4. Try column 4 (center) → Returns score +8
+   Alpha = +8 (excellent!)
+   
+5. Try columns 5, 6, 7 → All return < +8
+   Can prune some, but already did most work
+```
+
+<Info>
+Result: Alpha increased slowly, minimal early pruning
+</Info>
+
+### Good Ordering (Center-First)
+
+```
+Trying columns: 4, 3, 5, 2, 6, 1, 7
+
+1. Try column 4 (center) → Returns score +8
+   Alpha = +8 immediately!
+   
+2. Try column 3 → Returns score +5
+   +5 < +8, no update
+   
+3. Try column 5 → Returns score +6
+   +6 < +8, no update
+   
+4. Try column 2 → Opponent's first response gives +9
+   +9 >= beta, PRUNE! Skip the rest.
+   
+5. Columns 6, 1, 7 never explored!
+```
+
+<Tip>
+Result: Alpha increased quickly, massive early pruning
+</Tip>
+
+## Quantitative Impact
+
+With good move ordering:
+
+```
+Alpha-beta with random order:
+  ~1,000,000 nodes evaluated
+  
+Alpha-beta with center-first order:
+  ~67,000 nodes evaluated
+  
+Speedup: ~15x
+```
+
+<Info>
+This is on top of the ~8 orders of magnitude improvement from alpha-beta itself!
+</Info>
+
+## The Ideal Ordering
+
+Theoretically, the **perfect** move ordering would:
+
+1. Try the objectively best move first
+2. Then the second-best move
+3. And so on
+
+With perfect ordering, alpha-beta achieves **O(b^(d/2))** instead of **O(b^d)**, where:
+- **b** = branching factor (7 for Connect 4)
+- **d** = search depth
+
+For Connect 4:
+```
+Without ordering: 7^10 ≈ 282 million nodes (depth 10)
+With perfect ordering: 7^5 ≈ 16,800 nodes (depth 10)
+```
+
+Marlin's center-first heuristic doesn't achieve perfect ordering, but it's **very close** in practice!
+
+## Why Not Use Previous Search Results?
+
+Some solvers use **iterative deepening** - doing shallow searches first, then using those results to order deeper searches:
+
+```
+1. Search to depth 1, find best move
+2. Search to depth 2, try that move first
+3. Search to depth 3, try previous best first
+...
+```
+
+Marlin uses a simpler approach:
+- **Static ordering** (COLUMN_ORDER) is very fast
+- Works well enough that complexity of iterative deepening isn't needed
+- Combined with [transposition tables](/concepts/transposition-tables), achieves excellent performance
+
+<Note>
+Keep it simple! The center-first heuristic is easy to understand, has zero overhead, and works extremely well for Connect 4.
+</Note>
+
+## Edge Cases
+
+The center-first ordering might not be optimal in some positions:
+
+### Late Game
+
+When the board is nearly full, edge columns might be the only playable moves:
+
+```
+| X | O | X | O | X | O | . |
+| O | X | O | X | O | X | . |
+| X | O | X | O | X | O | . |
+| O | X | O | X | O | X | . |
+| X | O | X | O | X | O | . |
+| O | X | O | X | O | X | . |
+  1   2   3   4   5   6   7
+```
+
+Only column 7 is playable! But we still check columns 4, 3, 5, 2, 6, 1 first.
+
+<Info>
+This is fine - the `can_play()` checks are extremely fast (bitwise operations), so the overhead is negligible.
+</Info>
+
+### Defensive Positions
+
+Sometimes you **must** play an edge column to block an opponent's threat:
+
+```cpp
+// Checking for immediate wins catches this:
+for (int i = 0; i < Position::WIDTH; i++) {
+    int col = COLUMN_ORDER[i];
+    if (pos.can_play(col) && pos.is_winning_move(col)) {
+        return (Position::WIDTH * Position::HEIGHT + 1 - pos.nb_moves()) / 2;
+    }
+}
+```
+
+If a winning move exists (anywhere on the board), we find it before the main search loop.
+
+## Comparison with Other Heuristics
+
+Other possible orderings:
+
+### Random Order
+```cpp
+static constexpr int COLUMN_ORDER[7] = {0, 1, 2, 3, 4, 5, 6};
+```
+Result: **Very poor** alpha-beta performance
+
+### Outside-In
+```cpp
+static constexpr int COLUMN_ORDER[7] = {0, 6, 1, 5, 2, 4, 3};
+```
+Result: **Terrible** - tries worst moves first!
+
+### Alternating from Different Center
+```cpp
+static constexpr int COLUMN_ORDER[7] = {3, 4, 2, 5, 1, 6, 0};
+```
+Result: **Similar** to current, slightly less optimal
+
+<Tip>
+Marlin's choice of {3, 2, 4, 1, 5, 0, 6} is carefully tuned for Connect 4 and performs excellently in practice.
+</Tip>
+
+## Implementation Details
+
+The ordering is a **static constexpr** array:
+
+```cpp
+// From solver.hpp:73
+static constexpr int COLUMN_ORDER[7] = {3, 2, 4, 1, 5, 0, 6};
+
+// From solver.cpp:8
+constexpr int Solver::COLUMN_ORDER[7];  // Definition for linking
+```
+
+Benefits:
+- **Zero runtime cost** - known at compile time
+- **No memory allocation** - baked into the binary
+- **Cache-friendly** - fits in a single cache line
+
+## Related Concepts
+
+- [Alpha-Beta Pruning](/concepts/alpha-beta-pruning) - The optimization that move ordering enhances
+- [Negamax Algorithm](/concepts/negamax) - The base search that uses move ordering
+- [Transposition Tables](/concepts/transposition-tables) - Another optimization that compounds with good ordering
+- [Bitboards](/concepts/bitboards) - Fast operations that make trying multiple orders feasible

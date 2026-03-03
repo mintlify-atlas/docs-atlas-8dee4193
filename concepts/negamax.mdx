@@ -1,0 +1,261 @@
+---
+title: 'Negamax Algorithm'
+description: 'Understand the core recursive search algorithm that powers Marlin'
+---
+
+## What is Negamax?
+
+Negamax is a variant of the Minimax algorithm used in two-player zero-sum games. From `solver.hpp:4-13`:
+
+<Info>
+In a two-player zero-sum game:
+- What's good for me is bad for my opponent (and vice versa)
+- The value of a position for player A = -(value for player B)
+</Info>
+
+Instead of alternating between MAX and MIN players, **Negamax always maximizes from the current player's perspective**. We just negate the score when we recurse to the opponent's turn.
+
+## How Negamax Differs from Minimax
+
+### Traditional Minimax
+
+In classical minimax, you alternate between two different functions:
+
+```cpp
+// Pseudocode
+int minimax(Position pos, bool isMaximizing) {
+    if (isMaximizing) {
+        int best = -INFINITY;
+        for (each move) {
+            int score = minimax(child, false);  // Minimize
+            best = max(best, score);
+        }
+        return best;
+    } else {
+        int best = +INFINITY;
+        for (each move) {
+            int score = minimax(child, true);   // Maximize
+            best = min(best, score);
+        }
+        return best;
+    }
+}
+```
+
+### Negamax Simplification
+
+Negamax uses a single function and negates scores:
+
+```cpp
+// Pseudocode
+int negamax(Position pos) {
+    int best = -INFINITY;
+    for (each move) {
+        int score = -negamax(child);  // Negate opponent's score!
+        best = max(best, score);
+    }
+    return best;
+}
+```
+
+<Tip>
+The key insight: Your best move is the one that gives your opponent the **worst** position from their perspective.
+</Tip>
+
+## The Core Recursive Principle
+
+From `solver.cpp:37-124`, here's the structure of Marlin's negamax implementation:
+
+```cpp
+int Solver::negamax(Position pos, int alpha, int beta) {
+    node_count_++;
+
+    // BASE CASE 1: Check if current player can win immediately
+    for (int i = 0; i < Position::WIDTH; i++) {
+        int col = COLUMN_ORDER[i];
+        if (pos.can_play(col) && pos.is_winning_move(col)) {
+            // Return positive score (we win!)
+            return (Position::WIDTH * Position::HEIGHT + 1 - pos.nb_moves()) / 2;
+        }
+    }
+
+    // BASE CASE 2: Check for draw
+    if (pos.nb_moves() >= Position::WIDTH * Position::HEIGHT - 1) {
+        return 0;  // Draw
+    }
+
+    // RECURSIVE CASE: Try all moves
+    for (int i = 0; i < Position::WIDTH; i++) {
+        int col = COLUMN_ORDER[i];
+        
+        if (pos.can_play(col)) {
+            Position next = pos;
+            next.make_move(col);
+
+            // Recursively evaluate from opponent's perspective
+            // Note: We negate and swap alpha/beta bounds
+            int score = -negamax(next, -beta, -alpha);
+
+            if (score > alpha) {
+                alpha = score;
+            }
+        }
+    }
+
+    return alpha;
+}
+```
+
+## Score Interpretation
+
+From `solver.hpp:50-57`, the returned score represents:
+
+```cpp
+// Positive = current player can force a win
+// Zero = draw with perfect play  
+// Negative = opponent can force a win
+```
+
+### Score Calculation
+
+Scores are based on **how quickly** you can win:
+
+```cpp
+// From solver.cpp:47
+return (Position::WIDTH * Position::HEIGHT + 1 - pos.nb_moves()) / 2;
+
+// Example calculations:
+// - Win in 1 move at move 10: (7*6+1-10)/2 = 20
+// - Win in 1 move at move 20: (7*6+1-20)/2 = 15  
+// - Win in 5 moves at move 10: (7*6+1-15)/2 = 17
+```
+
+<Info>
+Higher scores are better. Winning faster gives a higher score than winning slowly.
+</Info>
+
+## The Negation Step
+
+The key line that makes negamax work is:
+
+```cpp
+// From solver.cpp:100
+int score = -negamax(next, -beta, -alpha);
+```
+
+This does three things:
+
+1. **Negates the returned score**: A good position for the opponent becomes a bad position for us
+2. **Swaps alpha and beta**: Our upper bound becomes their lower bound (and vice versa)
+3. **Negates the bounds**: Because scores are from the opponent's perspective
+
+### Example
+
+Imagine we're evaluating a move:
+
+```
+Our perspective:    alpha = -5, beta = +10
+                           ↓
+Make move and recurse into opponent's turn
+                           ↓
+Opponent's perspective: alpha = -10, beta = +5  (negated & swapped)
+                           ↓
+Opponent returns: +3 (good for them)
+                           ↓
+We get: -3 (bad for us, since opponent has advantage)
+```
+
+## Entry Point
+
+The public `solve()` function initializes the search:
+
+```cpp
+// From solver.cpp:17-27
+int Solver::solve(const Position& pos) {
+    reset_node_count();
+    
+    // Initial bounds:
+    // alpha = can't be worse than losing on the very last possible move
+    // beta = can't be better than winning on the next move
+    int alpha = -(Position::WIDTH * Position::HEIGHT) / 2;
+    int beta = (Position::WIDTH * Position::HEIGHT + 1) / 2;
+    
+    return negamax(pos, alpha, beta);
+}
+```
+
+<Note>
+The initial alpha and beta represent the theoretical worst and best possible outcomes.
+</Note>
+
+## Base Cases
+
+The recursion stops when we reach a terminal state:
+
+### 1. Immediate Win
+
+```cpp
+// From solver.cpp:43-49
+for (int i = 0; i < Position::WIDTH; i++) {
+    int col = COLUMN_ORDER[i];
+    if (pos.can_play(col) && pos.is_winning_move(col)) {
+        // Current player wins!
+        return (Position::WIDTH * Position::HEIGHT + 1 - pos.nb_moves()) / 2;
+    }
+}
+```
+
+If any move wins immediately, return a high positive score.
+
+### 2. Draw (Board Full)
+
+```cpp
+// From solver.cpp:54-56
+if (pos.nb_moves() >= Position::WIDTH * Position::HEIGHT - 1) {
+    return 0;  // Draw
+}
+```
+
+If the board is full (42 moves), the game is a draw.
+
+## Node Count Tracking
+
+Marlin tracks how many positions it evaluates:
+
+```cpp
+// From solver.hpp:61-69
+unsigned long long get_node_count() const { return node_count_; }
+void reset_node_count() { node_count_ = 0; }
+
+// From solver.cpp:38
+node_count_++;  // Increment at start of each negamax call
+```
+
+<Tip>
+The node count is useful for benchmarking and understanding how much of the game tree was searched.
+</Tip>
+
+## Performance Without Optimizations
+
+Pure negamax (without alpha-beta pruning or transposition tables) would need to evaluate **every possible game sequence**. For Connect 4, this is roughly:
+
+```
+7^42 ≈ 1.1 × 10^35 positions (theoretical upper bound)
+```
+
+In practice, with valid moves only:
+
+```
+~4.5 × 10^12 positions to solve from start
+```
+
+<Info>
+This is where [alpha-beta pruning](/concepts/alpha-beta-pruning) and [transposition tables](/concepts/transposition-tables) become essential!
+</Info>
+
+## Related Concepts
+
+- [Alpha-Beta Pruning](/concepts/alpha-beta-pruning) - How Marlin skips large parts of the game tree
+- [Move Ordering](/concepts/move-ordering) - Making alpha-beta more effective
+- [Transposition Tables](/concepts/transposition-tables) - Caching results to avoid redundant work
+- [Bitboards](/concepts/bitboards) - The fast data structure that makes this all possible
