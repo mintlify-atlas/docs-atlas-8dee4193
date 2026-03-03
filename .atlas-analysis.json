@@ -1,0 +1,64 @@
+{
+  "projectType": "cli-tool",
+  "projectName": "Marlin",
+  "projectDescription": "High-performance Connect 4 solver using C++ bitboards and negamax algorithm with alpha-beta pruning.",
+  "theme": "aspen",
+  "primaryColor": "#1E88E5",
+  "lightColor": "#42A5F5",
+  "darkColor": "#1565C0",
+  "navigation": {
+    "groups": [
+      {
+        "group": "Get Started",
+        "pages": [
+          "introduction",
+          "installation",
+          "quickstart"
+        ]
+      },
+      {
+        "group": "Usage",
+        "pages": [
+          "usage/cli-commands",
+          "usage/move-format",
+          "usage/understanding-scores"
+        ]
+      },
+      {
+        "group": "Core Concepts",
+        "pages": [
+          "concepts/bitboards",
+          "concepts/negamax",
+          "concepts/alpha-beta-pruning",
+          "concepts/transposition-tables",
+          "concepts/move-ordering"
+        ]
+      },
+      {
+        "group": "API Reference",
+        "pages": [
+          "api/position",
+          "api/solver",
+          "api/transposition-table"
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Bitboard representation for blazing fast operations",
+    "Negamax solver with alpha-beta pruning",
+    "Transposition table caching to avoid redundant work",
+    "Move ordering optimization for better pruning",
+    "Simple CLI interface for game analysis"
+  ],
+  "publicApiSurface": [
+    "position [moves] - Set up position by playing moves",
+    "display - Show the current board",
+    "go - Find the best move",
+    "help - Show available commands",
+    "quit - Exit the program",
+    "Position class - Bitboard game state representation",
+    "Solver class - Negamax search with alpha-beta pruning",
+    "TranspositionTable class - Position evaluation cache"
+  ]
+}
